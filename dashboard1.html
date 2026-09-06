@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SmartGate AI City Management Control Center</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { background-color: #0b0f19; color: #e2e8f0; font-family: sans-serif; overflow-x: hidden; }
+        .analytics-card { background: #141b2d; border: 1px solid #1f2a40; border-radius: 6px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .info-label { color: #94a3b8; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; }
+        .stat-badge { font-size: 1.75rem; font-weight: 800; }
+        .nav-link { color: #94a3b8 !important; font-weight: 600; cursor: pointer; border: none !important; background: none; transition: 0.2s; }
+        .nav-link.active { background-color: #1e293b !important; color: #38bdf8 !important; border-radius: 6px; }
+
+        .junction-container { position: relative; width: 100%; height: 360px; background: #0f172a; border: 2px solid #334155; border-radius: 12px; overflow: hidden; }
+        .road-vertical { position: absolute; left: 50%; top: 0; width: 80px; height: 100%; background: #1e293b; transform: translateX(-50%); border-left: 3px solid #475569; border-right: 3px solid #475569; }
+        .road-vertical::before { content: ''; position: absolute; left: 50%; top: 0; width: 2px; height: 100%; border-left: 2px dashed #94a3b8; transform: translateX(-50%); }
+        .road-horizontal { position: absolute; top: 50%; left: 0; width: 100%; height: 80px; background: #1e293b; transform: translateY(-50%); border-top: 3px solid #475569; border-bottom: 3px solid #475569; }
+        .road-horizontal::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 2px; border-top: 2px dashed #94a3b8; transform: translateY(-50%); }
+        .center-square { position: absolute; top: 50%; left: 50%; width: 80px; height: 80px; background: #1e293b; transform: translate(-50%, -50%); z-index: 2; border: 1px solid #64748b; }
+
+        .signal-pole-cluster { position: absolute; top: 50%; left: 50%; width: 130px; height: 130px; transform: translate(-50%, -50%); z-index: 5; pointer-events: none; }
+        .traffic-light-lens { position: absolute; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #000; background-color: #ef4444; box-shadow: 0 0 10px #ef4444; }
+
+        .tl-north { top: 0; left: 50%; transform: translateX(-50%); }
+        .tl-south { bottom: 0; left: 50%; transform: translateX(-50%); }
+        .tl-east { right: 0; top: 50%; transform: translateY(-50%); }
+        .tl-west { left: 0; top: 50%; transform: translateY(-50%); }
+
+        .stopped-lane-container { position: absolute; pointer-events: none; z-index: 4; display: flex; gap: 6px; }
+        .lane-west-cars { left: 80px; top: 52%; transform: translateY(-50%); }
+        .lane-west-cars .sim-car-node { transform: scaleX(-1); }
+        .lane-east-cars { right: 80px; top: 44%; transform: translateY(-50%); flex-direction: row-reverse; }
+        .lane-east-cars .sim-car-node { transform: scaleX(1); }
+        .lane-north-cars { top: 30px; left: 45%; flex-direction: column; }
+        .lane-south-cars { bottom: 30px; left: 52%; flex-direction: column-reverse; }
+        .sim-car-node { font-size: 1.3rem; transition: transform 3s linear, opacity 0.5s; display: inline-block; }
+
+        #animated-vehicle { position: absolute; width: 32px; height: 32px; font-size: 1.7rem; line-height: 32px; text-align: center; z-index: 10; display: none; transform: scaleX(-1); }
+        .login-wrapper { min-height: 100vh; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle, #1e1b4b 0%, #0b0f19 100%); }
+        .violation-row { border-bottom: 1px solid #1f2a40; padding: 8px 0; font-size: 0.9rem; }
+        #live-map-container { height: 180px; width: 100%; border-radius: 6px; border: 1px solid #334155; margin-top: 10px; background-color: #1a2238; }
+
+        @keyframes alertFlasher { 0% { border-color: #ef4444; box-shadow: 0 0 10px #ef4444; } 50% { border-color: #0b0f19; box-shadow: none; } 100% { border-color: #ef4444; box-shadow: 0 0 10px #ef4444; } }
+        .sos-active-alert { animation: alertFlasher 1s infinite; border: 3px solid #ef4444 !important; }
+    </style>
+</head>
+<body>
+
+    <div id="view-auth-gate" class="login-wrapper">
+        <div class="card p-4 analytics-card text-center" style="width: 400px; border-color: #312e81;">
+            <h3 class="text-white mb-2">🚨 SmartGate AI</h3>
+            <p class="text-muted small mb-4">Jharkhand ICCC Urban Operations Portal</p>
+            <form onsubmit="handleSecureLogin(event)">
+                <div class="mb-3 text-start"><label class="form-label info-label">Enter Operator Name</label><input type="text" id="authUsername" class="form-control bg-dark text-white border-secondary" placeholder="e.g., Riya" required></div>
+                <div class="mb-4 text-start"><label class="form-label info-label">Security Access PIN</label><input type="password" class="form-control bg-dark text-white border-secondary" placeholder="••••••••" required></div>
+                <button type="submit" class="btn btn-primary w-100 fw-bold py-2">Initialize Command Matrix</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="view-main-app" class="d-none p-4">
+
+        <!-- 🚨 TELEGRAM INTEGRATED INLINE ALERT PANEL -->
+        <div id="inlineSosPanel" class="p-3 mb-4 d-none rounded text-center" style="background: rgba(239, 68, 68, 0.15); border: 2px solid #ef4444;">
+            <h5 class="text-danger fw-extrabold m-0 mb-1">🚨 COMPUTER VISION CRASH DETECTED AT ALBERT EKKA CHOWK</h5>
+            <p class="small text-warning mb-3 font-monospace">📡 [EXTERNAL TELEGRAM ENGINE ACTIVE]: Secure outbound encrypted dispatch sent directly to medical services!</p>
+            <button class="btn btn-sm btn-success fw-bold px-4" onclick="acknowledgeInlineCrash()">🟢 Acknowledge & Dispatch Help Teams</button>
+        </div>
+
+        <header class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom border-secondary">
+            <div>
+                <h4 class="m-0 text-white">Welcome back, <span id="display-user-greeting" class="text-info">User</span>! ⚡</h4>
+                <div class="small text-muted">ICCC Central Grid Management Control System</div>
+            </div>
+            <ul class="nav nav-pills bg-dark p-1 rounded" id="appModuleTabs" style="border: 1px solid #1f2a40;">
+                <li class="nav-item"><button id="tab-link-hub" class="nav-link active" onclick="switchAppPage('hub')">📊 Main Control Hub</button></li>
+                <li class="nav-item"><button id="tab-link-atcs" class="nav-link" onclick="switchAppPage('atcs')">🗺️ AI ATCS Tracker</button></li>
+                <li class="nav-item"><button id="tab-link-cam" class="nav-link" onclick="switchAppPage('cam')">📹 Camera Registries</button></li>
+                <li class="nav-item"><button id="tab-link-db" class="nav-link" onclick="switchAppPage('db')">📂 Live Database Logs</button></li>
+                <li class="nav-item ms-3 border-start border-secondary ps-2"><button class="btn btn-sm btn-outline-danger font-monospace" onclick="window.location.reload()">LOGOUT</button></li>
+            </ul>
+        </header>
+
+        <!-- SUB-PAGE: MAIN HUB -->
+        <div id="sub-page-hub">
+            <div class="row g-4 mb-4">
+                <div class="col-md-3"><div class="analytics-card border-start border-4 border-info"><div class="info-label">📍 Total E-Challan Revenue</div><div class="stat-badge text-info mt-1" id="stat-revenue">₹--</div></div></div>
+                <div class="col-md-3"><div class="analytics-card border-start border-4 border-danger" id="card-accident-alert"><div class="info-label">⚠️ Accident Records Today</div><div class="stat-badge text-danger mt-1" id="stat-accidents">--</div></div></div>
+                <div class="col-md-3"><div class="analytics-card border-start border-4 border-warning"><div class="info-label">📋 Today's Processed Challans</div><div class="stat-badge text-warning mt-1" id="stat-challans">--</div></div></div>
+                <div class="col-md-3"><div class="analytics-card border-start border-4 border-success"><div class="info-label">📈 Real-Time Grid Latency</div><div class="stat-badge text-success mt-1">98.4%</div></div></div>
+            </div>
+            <div class="row g-4">
+                <div class="col-md-7"><div class="analytics-card h-100"><h5>📊 Traffic Density Statistical Matrix</h5><div style="height: 380px; position: relative;"><canvas id="trafficStatsChart"></canvas></div></div></div>
+                <div class="col-md-5 d-flex flex-column gap-4">
+                    <div class="analytics-card flex-grow-1"><h5>📊 Smart Traffic Violation Analytics</h5><div class="d-flex flex-column" id="violation-analytics-box"></div></div>
+                    <div class="analytics-card"><h5>🌐 Live City GPS Tracking GIS Map</h5><div id="live-map-container"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SUB-PAGE: AI ATCS -->
+        <div id="sub-page-atcs" class="d-none">
+            <div class="p-4 analytics-card mb-4">
+                <h5>🚦 Intelligent Crossroad Light Override & Transit Simulation</h5>
+                <div class="junction-container">
+                    <div class="road-vertical"></div><div class="road-horizontal"></div><div class="center-square"></div>
+                    <div id="container-west" class="stopped-lane-container lane-west-cars"><div class="sim-car-node" id="w-car-1">🚗</div><div class="sim-car-node" id="w-car-2">🚗</div><div class="sim-car-node" id="w-car-3">🚗</div><div class="sim-car-node" id="w-car-4">🚗</div></div>
+                    <div id="container-east" class="stopped-lane-container lane-east-cars"><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div></div>
+                    <div id="container-north" class="stopped-lane-container lane-north-cars"><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div></div>
+                    <div id="container-south" class="stopped-lane-container lane-south-cars"><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div><div class="sim-car-node">🚗</div></div>
+                    <div class="signal-pole-cluster"><div id="tl-north-bulb" class="traffic-light-lens tl-north"></div><div id="tl-south-bulb" class="traffic-light-lens tl-south"></div><div id="tl-east-bulb" class="traffic-light-lens tl-east"></div><div id="tl-west-bulb" class="traffic-light-lens tl-west"></div></div>
+                    <div id="animated-vehicle">🚗</div>
+                </div>
+            </div>
+            <div class="row g-4">
+                <div class="col-md-4"><div class="p-4 analytics-card"><h5>Sensor Input Stream</h5><input type="file" id="uploadFrame" class="form-control bg-dark text-white border-secondary mb-3"><button onclick="executePipeline()" class="btn btn-danger w-100 fw-bold py-2">Process Emergency Frame</button></div></div>
+                <div class="col-md-8"><div class="p-4 analytics-card h-100"><h5 class="mb-4 text-info">📊 Real-Time Control Center Insights</h5>
+                    <div class="row g-4">
+                        <div class="col-md-6"><div class="info-label">🚨 System Protocol Action</div><div class="text-warning fw-bold" id="val-protocol">-</div></div>
+                        <div class="col-md-6"><div class="info-label">🚗 Vehicle Classification</div><div class="text-success fw-bold" id="val-type">-</div></div>
+                        <div class="col-md-6"><div class="info-label">🔢 Extracted Plate Number</div><div class="text-primary fs-4 font-monospace" id="val-plate">-</div></div>
+                        <div class="col-md-6"><div class="info-label">📈 Traffic Density State</div><div id="val-traffic">-</div></div>
+                    </div>
+                </div></div>
+            </div>
+        </div>
+
+        <!-- SUB-PAGE: CAMERA REGISTRY -->
+        <div id="sub-page-cam" class="d-none">
+            <div class="row g-4">
+                <div class="col-md-5"><div class="p-4 analytics-card"><h5>📹 Register New ICCC Nodes</h5><form id="cameraForm" onsubmit="registerCamera(event)"><div class="mb-3"><label class="info-label">Camera Stream ID</label><input type="text" id="camId" class="form-control bg-dark text-white border-secondary" required></div><div class="mb-3"><label class="info-label">Chowk Name</label><input type="text" id="camLoc" class="form-control bg-dark text-white border-secondary" required></div><div class="mb-3"><label class="info-label">Timestamp</label><input type="text" id="camTime" class="form-control bg-dark text-muted border-secondary" readonly></div><button type="submit" class="btn btn-primary w-100 fw-bold py-2">Add Node Matrix Registry</button></form></div></div>
+                <div class="col-md-7"><div class="p-4 analytics-card"><h5>🌐 Active Node Stream Registries</h5><table class="table table-dark table-striped align-middle"><thead><tr><th>ID</th><th>Location</th><th>Timestamp</th><th>Status</th></tr></thead><tbody id="cameraTableBody"><tr><td>CAM-RNC-01</td><td>Naya More Junction</td><td>09-07-2026 | 14:11:05</td><td><span class="badge bg-success">ONLINE</span></td></tr><tr><td>CAM-RNC-02</td><td>Albert Ekka Chowk</td><td>09-07-2026 | 14:15:32</td><td><span class="badge bg-success">ONLINE</span></td></tr></tbody></table></div></div>
+            </div>
+        </div>
+
+        <!-- SUB-PAGE: LIVE DATABASE LOGS -->
+        <div id="sub-page-db" class="d-none">
+            <div class="p-4 analytics-card">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h5 class="text-white m-0">📂 Live Integrated SQLite Database Engine (`traffic_logs` table)</h5>
+                    <div><button class="btn btn-sm btn-success me-2 fw-bold" onclick="exportTableToCSV()">📥 Export Audit Report (CSV)</button><button class="btn btn-sm btn-outline-info" onclick="refreshLiveDatabaseGrid()">🔄 Refresh Rows</button></div>
+                </div>
+                <div class="table-responsive" style="max-height: 450px; overflow-y: auto;">
+                    <table class="table table-dark table-striped table-bordered align-middle text-center m-0" id="db-main-data-table">
+                        <thead class="table-primary sticky-top text-dark"><tr><th>LOG ID</th><th>TIMESTAMP</th><th>VEHICLE CLASSIFICATION (AI OUT)</th><th>EXTRACTED PLATE</th><th>LANE</th><th>PRIORITY</th></tr></thead>
+                        <tbody id="liveDatabaseTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let statsChartInstance = null;
+        let leafletMapInstance = null;
+        let normalTrafficInterval = null;
+        let activeEmergencyOverride = false;
+        let currentWestLightState = "🔴";
+        let currentDatabaseLogsCache = [];
+
+        let audioBuzzerContext = null;
+        let buzzerIntervalId = null;
+
+        // 🚨 LIVE SECURE BOT ACCESS GATEWAYS INTEGRATION
+        const TELEGRAM_BOT_TOKEN = "8601104571:AAEnHD6-oYQkxxUBegCZMO6gXN_isDOCudA";
+        const TELEGRAM_CHAT_ID = "5889599028";
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initializeChartMetrics();
+            initializeLiveGISMap();
+        });
+
+        async function handleSecureLogin(e) {
+            e.preventDefault();
+            document.getElementById('display-user-greeting').innerText = document.getElementById('authUsername').value;
+            document.getElementById('view-auth-gate').classList.add('d-none');
+            document.getElementById('view-main-app').classList.remove('d-none');
+
+            setTimeout(() => {
+                if (leafletMapInstance) leafletMapInstance.invalidateSize();
+            }, 200);
+
+            updateLiveClock();
+            await reloadMetricsData();
+            startBackgroundTrafficCycle();
+        }
+
+        function triggerBuzzerSoundLoop() {
+            if (!audioBuzzerContext) audioBuzzerContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (buzzerIntervalId) return;
+            buzzerIntervalId = setInterval(() => {
+                let osc = audioBuzzerContext.createOscillator();
+                let gain = audioBuzzerContext.createGain();
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(880, audioBuzzerContext.currentTime);
+                gain.gain.setValueAtTime(0.25, audioBuzzerContext.currentTime);
+                osc.connect(gain);
+                gain.connect(audioBuzzerContext.destination);
+                osc.start();
+                osc.stop(audioBuzzerContext.currentTime + 0.12);
+            }, 250);
+        }
+
+        async function acknowledgeInlineCrash() {
+            if (buzzerIntervalId) { clearInterval(buzzerIntervalId); buzzerIntervalId = null; }
+            document.getElementById("inlineSosPanel").classList.add("d-none");
+            document.getElementById("card-accident-alert").classList.remove("sos-active-alert");
+
+            await fetch('/api/v1/database/accidents/clear', { method: 'POST' });
+            await reloadMetricsData();
+            switchAppPage('hub');
+        }
+
+        async function reloadMetricsData() {
+            try {
+                let res = await fetch('/api/v1/database/metrics');
+                let metrics = await res.json();
+                document.getElementById("stat-revenue").innerText = "₹" + metrics.revenue.toLocaleString();
+                document.getElementById("stat-challans").innerText = metrics.challans + " Logs";
+                document.getElementById("stat-accidents").innerText = metrics.accidents;
+
+                let helmetCases = Math.floor(metrics.challans * 0.6);
+                let tripleCases = Math.floor(metrics.challans * 0.3);
+                let signalCases = metrics.challans - helmetCases - tripleCases;
+
+                document.getElementById("violation-analytics-box").innerHTML = `
+                    <div class="d-flex justify-content-between violation-row py-2"><span class="text-white">🪖 No Helmet Tracking:</span><span class="fw-bold text-danger fs-5">${helmetCases} Cases</span></div>
+                    <div class="d-flex justify-content-between violation-row py-2"><span class="text-white">🚴‍♂️ Triple Riding Logs:</span><span class="fw-bold text-warning fs-5">${tripleCases} Cases</span></div>
+                    <div class="d-flex justify-content-between violation-row py-2"><span class="text-white">🚦 Signal Jump Violations:</span><span class="fw-bold text-danger fs-5">${signalCases} Cases</span></div>
+                    <div class="d-flex justify-content-between violation-row mt-3 pt-2 border-top"><strong class="text-info fs-5">💰 Total Penalty Revenue:</strong><strong class="text-success fs-4">₹${metrics.revenue.toLocaleString()}.00</strong></div>
+                `;
+            } catch(e) { console.error("Metrics load error:", e); }
+        }
+
+        function initializeLiveGISMap() {
+            if (leafletMapInstance) return;
+            leafletMapInstance = L.map('live-map-container').setView([23.3687, 85.3255], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMapInstance);
+            L.marker([23.3687, 85.3255]).addTo(leafletMapInstance).bindPopup('🚨 <b>ICCC Center Node</b>').openPopup();
+        }
+
+        function updateLiveClock() {
+            const timeField = document.getElementById('camTime');
+            if (timeField) {
+                const now = new Date();
+                timeField.value = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()} | ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+            }
+        }
+        setInterval(updateLiveClock, 1000);
+
+        function startBackgroundTrafficCycle() {
+            if(normalTrafficInterval) clearInterval(normalTrafficInterval);
+            let phase = 0;
+            const states = [
+                { north: "#10b981", south: "#ef4444", east: "#ef4444", west: "#ef4444" },
+                { north: "#ef4444", south: "#10b981", east: "#ef4444", west: "#ef4444" },
+                { north: "#ef4444", south: "#ef4444", east: "#10b981", west: "#ef4444" },
+                { north: "#ef4444", south: "#ef4444", east: "#ef4444", west: "#10b981" },
+                { north: "#ef4444", south: "#ef4444", east: "#ef4444", west: "#eab308" }
+            ];
+            normalTrafficInterval = setInterval(() => {
+                if(activeEmergencyOverride) return;
+                let current = states[phase];
+
+                document.getElementById("tl-north-bulb").style.backgroundColor = current.north;
+                document.getElementById("tl-south-bulb").style.backgroundColor = current.south;
+                document.getElementById("tl-east-bulb").style.backgroundColor = current.east;
+                document.getElementById("tl-west-bulb").style.backgroundColor = current.west;
+
+                document.getElementById("tl-north-bulb").style.boxShadow = "0 0 15px " + current.north;
+                document.getElementById("tl-south-bulb").style.boxShadow = "0 0 15px " + current.south;
+                document.getElementById("tl-east-bulb").style.boxShadow = "0 0 15px " + current.east;
+                document.getElementById("tl-west-bulb").style.boxShadow = "0 0 15px " + current.west;
+
+                document.getElementById("container-north").style.display = current.north === "#ef4444" ? "flex" : "none";
+                document.getElementById("container-south").style.display = current.south === "#ef4444" ? "flex" : "none";
+                document.getElementById("container-east").style.display = current.east === "#ef4444" ? "flex" : "none";
+                document.getElementById("container-west").style.display = "flex";
+
+                if(current.west === "#10b981") {
+                    currentWestLightState = "🟢";
+                    disperseWestQueueOneByOne();
+                } else if(current.west === "#ef4444") {
+                    currentWestLightState = "🔴";
+                    resetWestQueueElements();
+                }
+                phase = (phase + 1) % states.length;
+            }, 3000);
+        }
+
+        function setDirectBulb(id, colorHex) {
+            const el = document.getElementById(id);
+            if(el) el.style.backgroundColor = colorHex;
+        }
+
+        function runJunctionSimulation(fileNameLower, backendLabel) {
+            activeEmergencyOverride = true;
+            const car = document.getElementById("animated-vehicle");
+            car.style.display = "block";
+            const isEmergency = fileNameLower.includes("ambulance") || fileNameLower.includes("police") || fileNameLower.includes("fire");
+            car.style.transform = "scaleX(-1)";
+
+            if(isEmergency) {
+                if(fileNameLower.includes("ambulance")) car.innerText = "🚑";
+                else if(fileNameLower.includes("police")) car.innerText = "🚓";
+                else car.innerText = "🚒";
+                setDirectBulb("tl-north-bulb", "#ef4444"); setDirectBulb("tl-south-bulb", "#ef4444"); setDirectBulb("tl-east-bulb", "#ef4444"); setDirectBulb("tl-west-bulb", "#10b981");
+                currentWestLightState = "🟢";
+                disperseWestQueueOneByOne();
+                car.style.transition = "none"; car.style.top = "47%"; car.style.left = "0%";
+                setTimeout(() => { car.style.transition = "left 6.0s linear"; car.style.left = "100%"; }, 100);
+                setTimeout(async () => { activeEmergencyOverride = false; car.style.display = "none"; resetWestQueueElements(); await reloadMetricsData(); refreshLiveDatabaseGrid(); }, 6500);
+            } else {
+                car.innerText = (fileNameLower.includes("bike") || fileNameLower.includes("motorcycle") || backendLabel.includes("Two-Wheeler")) ? "🏍️" : "🚗";
+                car.style.transition = "none"; car.style.top = "47%"; car.style.left = "0%";
+                if(currentWestLightState === "🔴") {
+                    setTimeout(() => { car.style.transition = "left 3.5s linear"; car.style.left = "34%"; }, 50);
+                    setTimeout(async () => { activeEmergencyOverride = false; car.style.display = "none"; await reloadMetricsData(); refreshLiveDatabaseGrid(); }, 4500);
+                } else {
+                    setTimeout(() => { car.style.transition = "left 6.0s linear"; car.style.left = "100%"; }, 50);
+                    setTimeout(async () => { activeEmergencyOverride = false; car.style.display = "none"; await reloadMetricsData(); refreshLiveDatabaseGrid(); }, 6300);
+                }
+            }
+        }
+
+        function disperseWestQueueOneByOne() {
+            setTimeout(() => { document.getElementById("w-car-1").style.transform = "translateX(450px)"; document.getElementById("w-car-1").style.opacity = "0"; }, 200);
+            setTimeout(() => { document.getElementById("w-car-2").style.transform = "translateX(450px)"; document.getElementById("w-car-2").style.opacity = "0"; }, 1000);
+            setTimeout(() => { document.getElementById("w-car-3").style.transform = "translateX(450px)"; document.getElementById("w-car-3").style.opacity = "0"; }, 1800);
+            setTimeout(() => { document.getElementById("w-car-4").style.transform = "translateX(450px)"; document.getElementById("w-car-4").style.opacity = "0"; }, 2600);
+        }
+
+        function resetWestQueueElements() {
+            for(let i=1; i<=4; i++) {
+                let el = document.getElementById(`w-car-${i}`);
+                if(el) { el.style.transition = "none"; el.style.transform = "translateX(0px)"; el.style.opacity = "1"; }
+            }
+        }
+
+        async function refreshLiveDatabaseGrid() {
+            const tableBody = document.getElementById("liveDatabaseTableBody");
+            try {
+                let res = await fetch('/api/v1/database/logs');
+                let data = await res.json();
+                currentDatabaseLogsCache = data.logs || [];
+                if(currentDatabaseLogsCache.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="6" class="text-muted py-4">Database table is empty.</td></tr>`;
+                    return;
+                }
+                let rowsHtml = "";
+                currentDatabaseLogsCache.forEach(log => {
+                    let badgeColor = log.priority_status === "HIGH" ? "bg-warning text-dark" : (log.priority_status === "CRITICAL" ? "bg-danger" : "bg-secondary");
+                    rowsHtml += `<tr><td class="font-monospace fw-bold text-info">${log.id}</td><td class="small text-muted">${log.timestamp}</td><td class="text-start fw-semibold">${log.vehicle_type}</td><td class="font-monospace text-warning">${log.license_plate}</td><td><span class="badge bg-dark border text-white">${log.lane_approached}</span></td><td><span class="badge ${badgeColor}">${log.priority_status}</span></td></tr>`;
+                });
+                tableBody.innerHTML = rowsHtml;
+            } catch(e) { console.error(e); }
+        }
+
+        function exportTableToCSV() {
+            if (currentDatabaseLogsCache.length === 0) { alert("No rows available to export."); return; }
+            let csvContent = "data:text/csv;charset=utf-8,Log ID,Timestamp,Vehicle Classification,License Plate,Lane Approaches,Priority\n";
+            currentDatabaseLogsCache.forEach(row => {
+                let cleanType = row.vehicle_type.replace(/,/g, "");
+                csvContent += `${row.id},${row.timestamp},${cleanType},${row.license_plate},${row.lane_approached},${row.priority_status}\n`;
+            });
+            const encodedUri = encodeURI(csvContent);
+            const downloadLink = document.createElement("a");
+            downloadLink.setAttribute("href", encodedUri);
+            downloadLink.setAttribute("download", `ICCC_AI_Traffic_AuditReport.csv`);
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+        }
+
+        async function executePipeline() {
+            const fileBox = document.getElementById('uploadFrame');
+            if(!fileBox.files[0]) { alert("Please upload the image stream frame."); return; }
+            const localFileName = fileBox.files[0].name.toLowerCase();
+            let packet = new FormData();
+            packet.append("file", fileBox.files[0]);
+
+            try {
+                let res = await fetch('/api/v1/camera/pipeline', { method: 'POST', body: packet });
+                let payload = await res.json();
+
+                document.getElementById('val-protocol').innerText = payload.system_action_protocol;
+                document.getElementById('val-type').innerText = payload.vehicle_classification;
+                document.getElementById('val-plate').innerText = payload.extracted_plate;
+                document.getElementById('val-traffic').innerText = payload.live_iccc_counters.traffic_density;
+
+                if(payload.is_accident || localFileName.includes("accident") || localFileName.includes("crash")) {
+                    document.getElementById("inlineSosPanel").classList.remove("d-none");
+                    document.getElementById("card-accident-alert").classList.add("sos-active-alert");
+
+                    await fetch('/api/v1/database/accidents/trigger', { method: 'POST' });
+                    await reloadMetricsData();
+                    triggerBuzzerSoundLoop();
+
+                    // 🔥 LIVE TELEGRAM BOT ROUTING ENVELOPE STRUCK IN REAL-TIME
+                    const tgText = `🚨 *SMARTGATE AI: EMERGENCY DISPATCH*\n\n⚠️ *CRITICAL COLLISION DETECTED*\n📍 *Location:* Albert Ekka Chowk, Ranchi\n🚗 *Vehicle:* ${payload.extracted_plate}\n\n🚑 *Status:* Outbound trauma unit triggered!`;
+                    const tgUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+                    fetch(tgUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chat_id: TELEGRAM_CHAT_ID,
+                            text: tgText,
+                            parse_mode: "Markdown"
+                        })
+                    }).then(() => console.log("Telegram alert sent successfully!"))
+                      .catch(err => console.error("Telegram endpoint grid error:", err));
+
+                } else {
+                    runJunctionSimulation(localFileName, payload.vehicle_classification);
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        function switchAppPage(targetSubPage) {
+            document.getElementById('sub-page-hub').classList.add('d-none');
+            document.getElementById('sub-page-atcs').classList.add('d-none');
+            document.getElementById('sub-page-cam').classList.add('d-none');
+            document.getElementById('sub-page-db').classList.add('d-none');
+
+            document.getElementById('tab-link-hub').classList.remove('active');
+            document.getElementById('tab-link-atcs').classList.remove('active');
+            document.getElementById('tab-link-cam').classList.remove('active');
+            document.getElementById('tab-link-db').classList.remove('active');
+
+            if(targetSubPage === 'hub') {
+                document.getElementById('sub-page-hub').classList.remove('d-none');
+                document.getElementById('tab-link-hub').classList.add('active');
+                reloadMetricsData();
+                if (leafletMapInstance) { leafletMapInstance.invalidateSize(); }
+            } else if(targetSubPage === 'atcs') {
+                document.getElementById('sub-page-atcs').classList.remove('d-none');
+                document.getElementById('tab-link-atcs').classList.add('active');
+            } else if(targetSubPage === 'cam') {
+                document.getElementById('sub-page-cam').classList.remove('d-none');
+                document.getElementById('tab-link-cam').classList.add('active');
+            } else if(targetSubPage === 'db') {
+                document.getElementById('sub-page-db').classList.remove('d-none');
+                document.getElementById('tab-link-db').classList.add('active');
+                refreshLiveDatabaseGrid();
+            }
+        }
+
+        // --- CHART VISUALIZATION LAYER MAPPING ---
+        function initializeChartMetrics() {
+            try {
+                const ctx = document.getElementById('trafficStatsChart').getContext('2d');
+                if(statsChartInstance) { statsChartInstance.destroy(); }
+                statsChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'],
+                        datasets: [{
+                            label: 'Average Traffic Flow Rate (Vehicles/min)',
+                            data: [45, 110, 75, 85, 60, 130, 95],
+                            borderColor: '#38bdf8',
+                            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                            borderWidth: 3,
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { labels: { color: '#94a3b8' } } },
+                        scales: {
+                            x: { grid: { color: '#1f2a40' }, ticks: { color: '#94a3b8' } },
+                            y: { grid: { color: '#1f2a40' }, ticks: { color: '#94a3b8' } }
+                        }
+                    }
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        function registerCamera(e) {
+            e.preventDefault();
+            const id = document.getElementById('camId').value;
+            const loc = document.getElementById('camLoc').value;
+            const timestamp = document.getElementById('camTime').value;
+            const tableBody = document.getElementById('cameraTableBody');
+            const newRow = `<tr><td>${id}</td><td>${loc}</td><td>${timestamp}</td><td><span class="badge bg-success">ONLINE</span></td></tr>`;
+            tableBody.innerHTML += newRow;
+            document.getElementById('cameraForm').reset();
+            updateLiveClock();
+            alert("New CCTV Camera Node Successfully Registered!");
+        }
+    </script>
+</body>
+</html>
